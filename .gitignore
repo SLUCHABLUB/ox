@@ -3,4 +3,5 @@
 *.swo
 *.swn
 /.vscode
+/.idea
 *.html
