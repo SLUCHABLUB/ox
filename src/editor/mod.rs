@@ -16,6 +16,8 @@ use std::path::Path;
 use std::time::Instant;
 use synoptic::Highlighter;
 
+pub mod lsp;
+
 mod cursor;
 mod documents;
 mod editing;
@@ -78,6 +80,8 @@ pub struct Editor {
     pub file_tree_selection: Option<String>,
     /// For caching a pointer to go back to when in a file tree
     pub old_ptr: Vec<usize>,
+    /// The lsp client instances active in the workspace.
+    pub lsp_clients: Vec<lsp::Client>,
 }
 
 impl Editor {
@@ -106,6 +110,7 @@ impl Editor {
             file_tree: None,
             file_tree_selection: None,
             old_ptr: vec![],
+            lsp_clients: vec![],
         })
     }
 

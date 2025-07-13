@@ -2,7 +2,8 @@
 use crate::cli::VERSION;
 #[cfg(not(target_os = "windows"))]
 use crate::config::runner::RunCommand;
-use crate::editor::{Editor, FileContainer, FileLayout};
+use crate::editor::lsp::Client;
+use crate::editor::{Editor, FileLayout};
 #[cfg(not(target_os = "windows"))]
 use crate::pty::Pty;
 use crate::ui::Feedback;
@@ -10,8 +11,19 @@ use crate::{config, fatal_error, PLUGIN_BOOTSTRAP, PLUGIN_MANAGER, PLUGIN_NETWOR
 use kaolinite::utils::{get_absolute_path, get_cwd, get_file_ext, get_file_name};
 use kaolinite::Loc;
 use mlua::prelude::*;
+use mlua::Table;
 #[cfg(not(target_os = "windows"))]
 use std::collections::HashMap;
+use std::ffi::OsString;
+
+impl Editor {
+    fn file_type_name(&self) -> &str {
+        self.files
+            .get(self.ptr.clone())
+            .and_then(|container| container.file_type.as_ref())
+            .map_or("Unknown", |file_type| &file_type.name)
+    }
+}
 
 impl LuaUserData for Editor {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
@@ -59,13 +71,7 @@ impl LuaUserData for Editor {
             Ok(editor.files.get_all(editor.ptr.clone()).len())
         });
         fields.add_field_method_get("document_type", |_, editor| {
-            Ok(editor
-                .files
-                .get(editor.ptr.clone())
-                .unwrap_or(&FileContainer::default())
-                .file_type
-                .clone()
-                .map_or("Unknown".to_string(), |ft| ft.name))
+            Ok(editor.file_type_name().to_owned())
         });
         fields.add_field_method_get("file_name", |_, editor| {
             if let Some(doc) = editor.try_doc() {
@@ -860,20 +866,14 @@ impl LuaUserData for Editor {
         methods.add_method_mut("run_file", |lua, editor, ()| {
             if let Some(doc) = editor.try_doc() {
                 // Get file type
-                let kind = editor
-                    .files
-                    .get(editor.ptr.clone())
-                    .unwrap_or(&FileContainer::default())
-                    .file_type
-                    .clone()
-                    .map_or("Unknown".to_string(), |ft| ft.name);
+                let kind = editor.file_type_name();
                 // Get the file path
                 let file_path = get_absolute_path(&doc.file_name.clone().unwrap_or_default());
                 // If the file path is valid...
                 if let Some(path) = file_path {
                     // ...and we know how to run the file...
                     let runcmds = lua.globals().get::<HashMap<String, RunCommand>>("runner")?;
-                    if let Some(cmds) = runcmds.get(&kind) {
+                    if let Some(cmds) = runcmds.get(kind) {
                         let RunCommand { compile, run } = cmds;
                         // ...open a terminal...
                         if let Ok(term) = Pty::new(config!(editor.config, terminal).shell) {
@@ -932,6 +932,57 @@ impl LuaUserData for Editor {
             }
             Ok(())
         });
+        methods.add_method_mut(
+            "start_language_server",
+            |lua, editor, executable: Option<OsString>| {
+                let file_type = editor.file_type_name();
+
+                let Some(executable) = executable.or_else(|| {
+                    lua.globals()
+                        .get::<Table>("language_servers")
+                        .ok()?
+                        .get::<Option<OsString>>(file_type)
+                        .ok()?
+                }) else {
+                    editor.feedback = Feedback::Error(format!(
+                        "Unable to find the language server executable for `{}`",
+                        editor.file_type_name()
+                    ));
+                    return Ok(());
+                };
+
+                match Client::new(&executable, Box::from(file_type)) {
+                    Ok(client) => editor.lsp_clients.push(client),
+                    Err(error) => {
+                        editor.feedback = Feedback::Error(error.to_string());
+                    }
+                }
+
+                Ok(())
+            },
+        );
+        methods.add_method_mut(
+            "stop_language_server",
+            |_, editor, name: Option<Box<str>>| {
+                let file_type = editor.file_type_name();
+
+                let index = editor.lsp_clients.iter().position(|client| match &name {
+                    Some(name) => *client.server_name == **name,
+                    None => *client.language == *file_type,
+                });
+
+                if let Some(index) = index {
+                    editor.lsp_clients.remove(index);
+                } else if let Some(name) = name {
+                    editor.feedback = Feedback::Warning(format!("No running server named {name}"));
+                } else {
+                    editor.feedback =
+                        Feedback::Warning(format!("No running server for {file_type}"));
+                }
+
+                Ok(())
+            },
+        )
     }
 }
 

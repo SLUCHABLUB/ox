@@ -43,6 +43,11 @@ shellexpand = "3.1.0"
 synoptic = "2.2.9"
 regex = "1.11.1"
 
+# LSP dependencies
+async-lsp-client = "0.2.3"
+tokio = { version = "1.44.2", features = ["io-util", "rt", "process"] }
+tower-lsp = "0.20.0"
+
 # Non-windows dependencies (for terminal)
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 ptyprocess = "0.4.1"

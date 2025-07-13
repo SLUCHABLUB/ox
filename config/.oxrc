@@ -400,6 +400,16 @@ commands = {
             editor:display_error(tostring(arguments[1]) .. " is not a valid macro command")
         end
     end,
+    ["lsp"] = function(arguments)
+        if arguments[1] == "start" then
+            -- TODO: pass all remaining arguments
+            editor:start_language_server(arguments[2])
+        elseif arguments[1] == "stop" then
+            editor:stop_language_server(arguments[2])
+        else
+            editor:display_error(tostring(arguments[1]) .. " is not a valid lsp command")
+        end
+    end
 }
 
 -- Configure Documents --
